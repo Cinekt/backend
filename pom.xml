@@ -9,9 +9,9 @@
 		<relativePath/> <!-- lookup parent from repository -->
 	</parent>
 	<groupId>com.jacobo</groupId>
-	<artifactId>security-jwt-template</artifactId>
+	<artifactId>cinekt</artifactId>
 	<version>0.0.1-SNAPSHOT</version>
-	<name>security-jwt-template</name>
+	<name>cinekt</name>
 	<description/>
 	<url/>
 	<licenses>
