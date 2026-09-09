@@ -14,6 +14,7 @@ import lombok.Getter;
 @Getter
 @EqualsAndHashCode
 public class UserDetailsImpl implements UserDetails {
+    private final Long id;
     private final String username;
     private final String password;
     private final boolean accountNonExpired;
@@ -22,7 +23,8 @@ public class UserDetailsImpl implements UserDetails {
     private final boolean enabled;
     private final Collection<? extends GrantedAuthority> authorities;
 
-    public UserDetailsImpl(String username, String password, Collection<? extends GrantedAuthority> authorities) {
+    public UserDetailsImpl(Long id, String username, String password, Collection<? extends GrantedAuthority> authorities) {
+        this.id = id;
         this.username = username;
         this.password = password;
         this.authorities = authorities;
@@ -35,6 +37,6 @@ public class UserDetailsImpl implements UserDetails {
     public static UserDetailsImpl build(User user) {
         var authorities = user.getRoles().stream().map(role -> role.getName().name()).map(SimpleGrantedAuthority::new)
                 .toList();
-        return new UserDetailsImpl(user.getUsername(), user.getPassword(), authorities);
+        return new UserDetailsImpl(user.getId(), user.getEmail(), user.getPassword(), authorities);
     }
 }

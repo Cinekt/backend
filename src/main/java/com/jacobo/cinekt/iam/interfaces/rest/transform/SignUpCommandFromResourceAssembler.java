@@ -5,6 +5,6 @@ import com.jacobo.cinekt.iam.interfaces.rest.resources.SignUpResource;
 
 public class SignUpCommandFromResourceAssembler {
     public static SignUpCommand toCommandFromResource(SignUpResource resource) {
-        return new SignUpCommand(resource.username(), resource.password(), resource.roles());
+        return new SignUpCommand(resource.email(), resource.password());
     }
 }

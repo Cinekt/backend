@@ -8,7 +8,7 @@ import org.springframework.stereotype.Service;
 import com.jacobo.cinekt.iam.domain.model.aggregates.User;
 import com.jacobo.cinekt.iam.domain.model.queries.GetAllUsersQuery;
 import com.jacobo.cinekt.iam.domain.model.queries.GetUserByIdQuery;
-import com.jacobo.cinekt.iam.domain.model.queries.GetUserByUsernameQuery;
+import com.jacobo.cinekt.iam.domain.model.queries.GetUserByEmailQuery;
 import com.jacobo.cinekt.iam.domain.services.UserQueryService;
 import com.jacobo.cinekt.iam.infrastructure.persistence.jpa.repositories.UserRepository;
 
@@ -32,7 +32,7 @@ public class UserQueryServiceImpl implements UserQueryService {
     }
 
     @Override
-    public Optional<User> handle(GetUserByUsernameQuery query) {
-        return userRepository.findByUsername(query.username());
+    public Optional<User> handle(GetUserByEmailQuery query) {
+        return userRepository.findByEmail(query.email());
     }
 }

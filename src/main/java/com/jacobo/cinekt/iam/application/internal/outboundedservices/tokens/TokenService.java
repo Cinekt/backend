@@ -1,9 +1,18 @@
 package com.jacobo.cinekt.iam.application.internal.outboundedservices.tokens;
 
+import java.util.Date;
+
 public interface TokenService {
-    String generateToken(String username);
 
-    String getUsernameFromToken(String token);
+    String generateAccessToken(String email);
 
-    boolean validateToken(String token);
+    String generateRefreshToken(String email);
+
+    String getEmailFromToken(String token);
+
+    boolean validateAccessToken(String token);
+
+    boolean validateRefreshToken(String token);
+
+    Date getExpirationFromToken(String token);
 }

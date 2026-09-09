@@ -7,6 +7,7 @@ import java.util.Set;
 import com.jacobo.cinekt.iam.domain.model.entities.Role;
 import com.jacobo.cinekt.shared.domain.model.aggregates.AuditableAbstractAggregateRoot;
 import jakarta.persistence.*;
+import jakarta.validation.constraints.Email;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Size;
 import lombok.Getter;
@@ -16,9 +17,10 @@ public class User extends AuditableAbstractAggregateRoot<User> {
 
     @Getter
     @NotBlank
+    @Email
     @Size(max = 50)
     @Column(unique = true)
-    private String username;
+    private String email;
 
     @Getter
     @NotBlank
@@ -26,7 +28,7 @@ public class User extends AuditableAbstractAggregateRoot<User> {
     private String password;
 
     @Getter
-    @ManyToMany(fetch = FetchType.EAGER, cascade = CascadeType.ALL)
+    @ManyToMany(fetch = FetchType.EAGER)
     @JoinTable(name = "user_roles", joinColumns = @JoinColumn(name = "user_id"), inverseJoinColumns = @JoinColumn(name = "role_id"))
     private Set<Role> roles;
 
@@ -34,14 +36,14 @@ public class User extends AuditableAbstractAggregateRoot<User> {
         this.roles = new HashSet<>();
     }
 
-    public User(String username, String password) {
-        this.username = username;
+    public User(String email, String password) {
+        this.email = email;
         this.password = password;
         this.roles = new HashSet<>();
     }
 
-    public User(String username, String password, List<Role> roles) {
-        this(username, password);
+    public User(String email, String password, List<Role> roles) {
+        this(email, password);
         addRoles(roles);
     }
 
