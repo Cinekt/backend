@@ -37,6 +37,7 @@ import com.jacobo.cinekt.iam.domain.model.entities.Role;
 import com.jacobo.cinekt.iam.domain.model.exceptions.EmailAlreadyExistsException;
 import com.jacobo.cinekt.iam.domain.model.exceptions.InvalidCredentialsException;
 import com.jacobo.cinekt.iam.domain.model.exceptions.UserNotFoundException;
+import com.jacobo.cinekt.iam.domain.model.valueobjects.AuthenticationTokens;
 import com.jacobo.cinekt.iam.domain.model.valueobjects.Roles;
 import com.jacobo.cinekt.iam.infrastructure.persistence.jpa.repositories.RefreshTokenRepository;
 import com.jacobo.cinekt.iam.infrastructure.persistence.jpa.repositories.RoleRepository;
@@ -156,6 +157,7 @@ class UserCommandServiceImplTest {
     class HandleRefreshTokenCommand {
 
         private final User user = new User(EMAIL, HASHED_PASSWORD);
+        private final Instant future = Instant.now().plus(1, ChronoUnit.DAYS);
 
         @BeforeEach
         void stubHashing() {
@@ -164,57 +166,108 @@ class UserCommandServiceImplTest {
 
         @Test
         void returnsEmptyWhenNoStoredTokenMatchesTheHash() {
+            // Arrange
             when(refreshTokenRepository.findByTokenHash("hashed-refresh-token")).thenReturn(Optional.empty());
 
+            // Act
             var result = service.handle(new RefreshTokenCommand("raw-refresh-token"));
 
+            // Assert
             assertThat(result).isEmpty();
         }
 
         @Test
-        void returnsEmptyWhenTheStoredTokenIsExpiredOrRevoked() {
+        void rejectsAndRevokesTheWholeFamilyWhenAnAlreadyRotatedTokenIsReused() {
+            // Arrange: una cadena de 3 eslabones; se reusa el primero, que ya fue consumido
+            var first = new RefreshToken("hashed-refresh-token", user, future);
+            var second = first.rotate("hashed-refresh-token-2", future);
+            var third = second.rotate("hashed-refresh-token-3", future);
+            assertThat(third.isValid()).isTrue();
+            when(refreshTokenRepository.findByTokenHash("hashed-refresh-token")).thenReturn(Optional.of(first));
+            when(refreshTokenRepository.findAllByFamilyId(first.getFamilyId()))
+                    .thenReturn(List.of(first, second, third));
+
+            // Act
+            var result = service.handle(new RefreshTokenCommand("raw-refresh-token"));
+
+            // Assert: el eslabon que seguia vivo tambien muere
+            assertThat(result).isEmpty();
+            assertThat(third.isValid()).isFalse();
+            verify(refreshTokenRepository).saveAll(List.of(first, second, third));
+        }
+
+        @Test
+        void returnsEmptyWhenTheStoredTokenIsExpired() {
+            // Arrange
             var expiredToken = new RefreshToken("hashed-refresh-token", user, Instant.now().minus(1, ChronoUnit.DAYS));
             when(refreshTokenRepository.findByTokenHash("hashed-refresh-token")).thenReturn(Optional.of(expiredToken));
 
+            // Act
             var result = service.handle(new RefreshTokenCommand("raw-refresh-token"));
 
+            // Assert: expirar no es reuso, asi que la familia no se toca
             assertThat(result).isEmpty();
+            verify(refreshTokenRepository, never()).findAllByFamilyId(any());
         }
 
         @Test
         void returnsEmptyWhenTheJwtItselfFailsValidation() {
-            var validStoredToken = new RefreshToken("hashed-refresh-token", user, Instant.now().plus(1, ChronoUnit.DAYS));
+            // Arrange
+            var validStoredToken = new RefreshToken("hashed-refresh-token", user, future);
             when(refreshTokenRepository.findByTokenHash("hashed-refresh-token")).thenReturn(Optional.of(validStoredToken));
             when(tokenService.validateRefreshToken("raw-refresh-token")).thenReturn(false);
 
+            // Act
             var result = service.handle(new RefreshTokenCommand("raw-refresh-token"));
 
+            // Assert
             assertThat(result).isEmpty();
         }
 
         @Test
         void returnsEmptyWhenTheJwtEmailDoesNotMatchTheStoredTokensOwner() {
-            var validStoredToken = new RefreshToken("hashed-refresh-token", user, Instant.now().plus(1, ChronoUnit.DAYS));
+            // Arrange
+            var validStoredToken = new RefreshToken("hashed-refresh-token", user, future);
             when(refreshTokenRepository.findByTokenHash("hashed-refresh-token")).thenReturn(Optional.of(validStoredToken));
             when(tokenService.validateRefreshToken("raw-refresh-token")).thenReturn(true);
             when(tokenService.getEmailFromToken("raw-refresh-token")).thenReturn("someone-else@cinekt.local");
 
+            // Act
             var result = service.handle(new RefreshTokenCommand("raw-refresh-token"));
 
+            // Assert
             assertThat(result).isEmpty();
         }
 
         @Test
-        void returnsANewAccessTokenWhenEverythingIsValid() {
-            var validStoredToken = new RefreshToken("hashed-refresh-token", user, Instant.now().plus(1, ChronoUnit.DAYS));
-            when(refreshTokenRepository.findByTokenHash("hashed-refresh-token")).thenReturn(Optional.of(validStoredToken));
+        void rotatesTheRefreshTokenWhenEverythingIsValid() {
+            // Arrange
+            var storedToken = new RefreshToken("hashed-refresh-token", user, future);
+            var newExpiration = Date.from(Instant.now().plus(7, ChronoUnit.DAYS));
+            when(refreshTokenRepository.findByTokenHash("hashed-refresh-token")).thenReturn(Optional.of(storedToken));
             when(tokenService.validateRefreshToken("raw-refresh-token")).thenReturn(true);
             when(tokenService.getEmailFromToken("raw-refresh-token")).thenReturn(EMAIL);
+            when(tokenService.generateRefreshToken(EMAIL)).thenReturn("new-raw-refresh-token");
+            when(tokenService.getExpirationFromToken("new-raw-refresh-token")).thenReturn(newExpiration);
+            when(tokenHashingService.hash("new-raw-refresh-token")).thenReturn("new-hashed-refresh-token");
             when(tokenService.generateAccessToken(EMAIL)).thenReturn("new-access-token");
 
+            // Act
             var result = service.handle(new RefreshTokenCommand("raw-refresh-token"));
 
-            assertThat(result).contains("new-access-token");
+            // Assert: devuelve ambos tokens, consume el viejo y persiste el reemplazo
+            assertThat(result).contains(new AuthenticationTokens("new-access-token", "new-raw-refresh-token"));
+            assertThat(storedToken.isRevoked()).isTrue();
+
+            var savedCaptor = ArgumentCaptor.<List<RefreshToken>>captor();
+            verify(refreshTokenRepository).saveAll(savedCaptor.capture());
+            assertThat(savedCaptor.getValue()).hasSize(2);
+            assertThat(savedCaptor.getValue().get(0)).isSameAs(storedToken);
+            var rotated = savedCaptor.getValue().get(1);
+            assertThat(rotated.getTokenHash()).isEqualTo("new-hashed-refresh-token");
+            assertThat(rotated.getExpiresAt()).isEqualTo(newExpiration.toInstant());
+            assertThat(rotated.getFamilyId()).isEqualTo(storedToken.getFamilyId());
+            assertThat(rotated.isValid()).isTrue();
         }
     }
 

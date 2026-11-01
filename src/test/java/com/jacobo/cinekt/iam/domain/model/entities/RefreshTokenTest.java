@@ -87,4 +87,54 @@ class RefreshTokenTest {
             assertThat(token.isValid()).isFalse();
         }
     }
+
+    @Nested
+    class Rotate {
+
+        @Test
+        void revokesTheOldTokenAndReturnsAReplacementInTheSameFamily() {
+            // Arrange
+            var oldToken = new RefreshToken("old-hash", user, Instant.now().plus(1, ChronoUnit.DAYS));
+            var newExpiration = Instant.now().plus(7, ChronoUnit.DAYS);
+
+            // Act
+            var newToken = oldToken.rotate("new-hash", newExpiration);
+
+            // Assert
+            assertThat(oldToken.isRevoked()).isTrue();
+            assertThat(newToken.isValid()).isTrue();
+            assertThat(newToken.getTokenHash()).isEqualTo("new-hash");
+            assertThat(newToken.getExpiresAt()).isEqualTo(newExpiration);
+            assertThat(newToken.getFamilyId()).isEqualTo(oldToken.getFamilyId());
+            assertThat(newToken.getUser()).isSameAs(user);
+        }
+
+        @Test
+        void keepsTheWholeChainInTheSameFamilyAcrossSeveralRotations() {
+            // Arrange
+            var first = new RefreshToken("hash-1", user, Instant.now().plus(1, ChronoUnit.DAYS));
+
+            // Act
+            var third = first.rotate("hash-2", Instant.now().plus(1, ChronoUnit.DAYS))
+                    .rotate("hash-3", Instant.now().plus(1, ChronoUnit.DAYS));
+
+            // Assert
+            assertThat(third.getFamilyId()).isEqualTo(first.getFamilyId());
+        }
+    }
+
+    @Nested
+    class FamilyId {
+
+        @Test
+        void startsANewFamilyForEachFreshlyConstructedToken() {
+            // Arrange & Act
+            var oneSession = new RefreshToken("hash-a", user, Instant.now().plus(1, ChronoUnit.DAYS));
+            var anotherSession = new RefreshToken("hash-b", user, Instant.now().plus(1, ChronoUnit.DAYS));
+
+            // Assert
+            assertThat(oneSession.getFamilyId()).isNotBlank();
+            assertThat(oneSession.getFamilyId()).isNotEqualTo(anotherSession.getFamilyId());
+        }
+    }
 }

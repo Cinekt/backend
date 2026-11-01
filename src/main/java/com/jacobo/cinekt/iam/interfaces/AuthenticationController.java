@@ -51,13 +51,13 @@ public class AuthenticationController {
     }
 
     @PostMapping("/refresh")
-    public ResponseEntity<AccessTokenResource> refresh(@RequestBody RefreshTokenResource refreshTokenResource) {
+    public ResponseEntity<AuthenticationTokensResource> refresh(@RequestBody RefreshTokenResource refreshTokenResource) {
         var command = new RefreshTokenCommand(refreshTokenResource.refreshToken());
-        var accessToken = userCommandService.handle(command);
-        if (accessToken.isEmpty()) {
+        var tokens = userCommandService.handle(command);
+        if (tokens.isEmpty()) {
             return ResponseEntity.status(HttpStatus.UNAUTHORIZED).build();
         }
-        return ResponseEntity.ok(new AccessTokenResource(accessToken.get()));
+        return ResponseEntity.ok(new AuthenticationTokensResource(tokens.get().accessToken(), tokens.get().refreshToken()));
     }
 
     @PostMapping("/sign-out")

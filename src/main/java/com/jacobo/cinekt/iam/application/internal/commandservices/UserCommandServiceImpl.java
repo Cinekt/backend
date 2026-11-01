@@ -2,6 +2,7 @@ package com.jacobo.cinekt.iam.application.internal.commandservices;
 
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.List;
 import java.util.Optional;
 
 import com.jacobo.cinekt.iam.application.internal.outboundedservices.hashing.TokenHashingService;
@@ -85,14 +86,19 @@ public class UserCommandServiceImpl implements UserCommandService {
 
     @Override
     @Transactional
-    public Optional<String> handle(RefreshTokenCommand command) {
+    public Optional<AuthenticationTokens> handle(RefreshTokenCommand command) {
         var refreshTokenHash = tokenHashingService.hash(command.refreshToken());
         var refreshTokenEntity = refreshTokenRepository.findByTokenHash(refreshTokenHash);
         if (refreshTokenEntity.isEmpty()) {
             return Optional.empty();
         }
         var storedRefreshToken = refreshTokenEntity.get();
-        if (!storedRefreshToken.isValid()) {
+
+        if (storedRefreshToken.isRevoked()) {
+            revokeFamilyOf(storedRefreshToken);
+            return Optional.empty();
+        }
+        if (storedRefreshToken.isExpired()) {
             return Optional.empty();
         }
         if (!tokenService.validateRefreshToken(command.refreshToken())) {
@@ -104,8 +110,21 @@ public class UserCommandServiceImpl implements UserCommandService {
                 .equals(email)) {
             return Optional.empty();
         }
-        String newAccessToken = tokenService.generateAccessToken(email);
-        return Optional.of(newAccessToken);
+        var newRefreshToken = tokenService.generateRefreshToken(email);
+        var rotatedRefreshToken = storedRefreshToken.rotate(
+                tokenHashingService.hash(newRefreshToken),
+                extractExpiration(newRefreshToken));
+        refreshTokenRepository.saveAll(List.of(storedRefreshToken, rotatedRefreshToken));
+        var newAccessToken = tokenService.generateAccessToken(email);
+        return Optional.of(new AuthenticationTokens(newAccessToken, newRefreshToken));
+    }
+
+    private void revokeFamilyOf(RefreshToken reusedRefreshToken) {
+        LOGGER.warn("Refresh token reuse detected for user {}; revoking the whole token family",
+                reusedRefreshToken.getUser().getEmail());
+        var family = refreshTokenRepository.findAllByFamilyId(reusedRefreshToken.getFamilyId());
+        family.forEach(RefreshToken::revoke);
+        refreshTokenRepository.saveAll(family);
     }
 
     private Instant extractExpiration(String token){
