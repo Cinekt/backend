@@ -14,4 +14,5 @@ public interface UserCommandService {
     void handle(SignOutCommand command);
     void handle(SeedAdminCommand command);
     void handle(ChangeUserRoleCommand command);
+    AuthenticationTokens handle(ChangePasswordCommand command);
 }

@@ -17,6 +17,7 @@ import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 
 import com.jacobo.cinekt.shared.domain.model.exceptions.AuthenticationFailedException;
+import com.jacobo.cinekt.shared.domain.model.exceptions.InvalidRequestException;
 import com.jacobo.cinekt.shared.domain.model.exceptions.ResourceConflictException;
 import com.jacobo.cinekt.shared.domain.model.exceptions.ResourceNotFoundException;
 import com.jacobo.cinekt.shared.interfaces.rest.resources.ErrorResource;
@@ -46,6 +47,11 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(AuthenticationFailedException.class)
     public ResponseEntity<ErrorResource> handleAuthenticationFailed(AuthenticationFailedException exception) {
         return build(HttpStatus.UNAUTHORIZED, exception.getMessage(), null);
+    }
+
+    @ExceptionHandler(InvalidRequestException.class)
+    public ResponseEntity<ErrorResource> handleInvalidRequest(InvalidRequestException exception) {
+        return build(HttpStatus.BAD_REQUEST, exception.getMessage(), null);
     }
 
     @ExceptionHandler(MethodArgumentNotValidException.class)

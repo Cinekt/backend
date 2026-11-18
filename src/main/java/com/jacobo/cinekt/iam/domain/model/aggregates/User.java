@@ -57,4 +57,7 @@ public class User extends AuditableAbstractAggregateRoot<User> {
         return this;
     }
 
+    public void changePassword(String newPasswordHash) {
+        this.password = newPasswordHash;
+    }
 }

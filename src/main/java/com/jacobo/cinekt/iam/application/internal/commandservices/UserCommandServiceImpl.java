@@ -8,6 +8,7 @@ import java.util.Optional;
 import com.jacobo.cinekt.iam.application.internal.outboundedservices.hashing.TokenHashingService;
 import com.jacobo.cinekt.iam.domain.model.commands.*;
 import com.jacobo.cinekt.iam.domain.model.exceptions.EmailAlreadyExistsException;
+import com.jacobo.cinekt.iam.domain.model.exceptions.IncorrectCurrentPasswordException;
 import com.jacobo.cinekt.iam.domain.model.exceptions.InvalidCredentialsException;
 import com.jacobo.cinekt.iam.domain.model.exceptions.UserNotFoundException;
 import com.jacobo.cinekt.iam.domain.model.entities.RefreshToken;
@@ -75,13 +76,8 @@ public class UserCommandServiceImpl implements UserCommandService {
             LOGGER.warn("Sign-in rejected: wrong password for email {}", command.email());
             throw new InvalidCredentialsException();
         }
-        var accessToken = tokenService.generateAccessToken(user.get().getEmail());
-        var refreshToken = tokenService.generateRefreshToken(user.get().getEmail());
-        var refreshTokenHash = tokenHashingService.hash(refreshToken);
-        var refreshTokenEntity = new RefreshToken(refreshTokenHash, user.get(), extractExpiration(refreshToken));
-        refreshTokenRepository.save(refreshTokenEntity);
-        var tokens = new AuthenticationTokens(accessToken, refreshToken);
-        return Optional.of(new AuthenticatedUser(user.get(),tokens));
+        var tokens = issueTokensFor(user.get());
+        return Optional.of(new AuthenticatedUser(user.get(), tokens));
     }
 
     @Override
@@ -173,6 +169,35 @@ public class UserCommandServiceImpl implements UserCommandService {
         user.getRoles().clear();
         user.addRole(role);
         userRepository.save(user);
+    }
+
+    @Override
+    @Transactional
+    public AuthenticationTokens handle(ChangePasswordCommand command) {
+        var user = userRepository.findById(command.userId())
+                .orElseThrow(() -> new UserNotFoundException(command.userId()));
+        if (!hashingService.matches(command.currentPassword(), user.getPassword())) {
+            LOGGER.warn("Password change rejected: wrong current password for user {}", user.getEmail());
+            throw new IncorrectCurrentPasswordException();
+        }
+        user.changePassword(hashingService.encode(command.newPassword()));
+        userRepository.save(user);
+        revokeAllSessionsOf(user);
+        return issueTokensFor(user);
+    }
+
+    private void revokeAllSessionsOf(User user) {
+        var openSessions = refreshTokenRepository.findAllByUserAndRevokedFalse(user);
+        openSessions.forEach(RefreshToken::revoke);
+        refreshTokenRepository.saveAll(openSessions);
+    }
+
+    private AuthenticationTokens issueTokensFor(User user) {
+        var accessToken = tokenService.generateAccessToken(user.getEmail());
+        var refreshToken = tokenService.generateRefreshToken(user.getEmail());
+        refreshTokenRepository.save(
+                new RefreshToken(tokenHashingService.hash(refreshToken), user, extractExpiration(refreshToken)));
+        return new AuthenticationTokens(accessToken, refreshToken);
     }
 
 

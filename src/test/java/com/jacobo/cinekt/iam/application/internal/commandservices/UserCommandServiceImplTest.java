@@ -2,6 +2,7 @@ package com.jacobo.cinekt.iam.application.internal.commandservices;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.assertj.core.api.Assertions.catchThrowable;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -26,6 +27,7 @@ import com.jacobo.cinekt.iam.application.internal.outboundedservices.hashing.Has
 import com.jacobo.cinekt.iam.application.internal.outboundedservices.hashing.TokenHashingService;
 import com.jacobo.cinekt.iam.application.internal.outboundedservices.tokens.TokenService;
 import com.jacobo.cinekt.iam.domain.model.aggregates.User;
+import com.jacobo.cinekt.iam.domain.model.commands.ChangePasswordCommand;
 import com.jacobo.cinekt.iam.domain.model.commands.ChangeUserRoleCommand;
 import com.jacobo.cinekt.iam.domain.model.commands.RefreshTokenCommand;
 import com.jacobo.cinekt.iam.domain.model.commands.SeedAdminCommand;
@@ -35,6 +37,7 @@ import com.jacobo.cinekt.iam.domain.model.commands.SignUpCommand;
 import com.jacobo.cinekt.iam.domain.model.entities.RefreshToken;
 import com.jacobo.cinekt.iam.domain.model.entities.Role;
 import com.jacobo.cinekt.iam.domain.model.exceptions.EmailAlreadyExistsException;
+import com.jacobo.cinekt.iam.domain.model.exceptions.IncorrectCurrentPasswordException;
 import com.jacobo.cinekt.iam.domain.model.exceptions.InvalidCredentialsException;
 import com.jacobo.cinekt.iam.domain.model.exceptions.UserNotFoundException;
 import com.jacobo.cinekt.iam.domain.model.valueobjects.AuthenticationTokens;
@@ -390,6 +393,82 @@ class UserCommandServiceImplTest {
 
             assertThat(user.getRoles()).containsExactly(newRole);
             verify(userRepository).save(user);
+        }
+    }
+
+    @Nested
+    class ChangePassword {
+
+        private static final Long USER_ID = 1L;
+        private static final String NEW_RAW_PASSWORD = "new-raw-password";
+        private static final String NEW_HASHED_PASSWORD = "new-hashed-password";
+
+        @Test
+        void throwsWhenTheUserDoesNotExist() {
+            // Arrange
+            when(userRepository.findById(USER_ID)).thenReturn(Optional.empty());
+
+            // Act
+            var thrown = catchThrowable(
+                    () -> service.handle(new ChangePasswordCommand(USER_ID, RAW_PASSWORD, NEW_RAW_PASSWORD)));
+
+            // Assert
+            assertThat(thrown).isInstanceOf(UserNotFoundException.class);
+        }
+
+        @Test
+        void rejectsTheChangeWhenTheCurrentPasswordDoesNotMatch() {
+            // Arrange
+            var user = new User(EMAIL, HASHED_PASSWORD);
+            when(userRepository.findById(USER_ID)).thenReturn(Optional.of(user));
+            when(hashingService.matches(RAW_PASSWORD, HASHED_PASSWORD)).thenReturn(false);
+
+            // Act
+            var thrown = catchThrowable(
+                    () -> service.handle(new ChangePasswordCommand(USER_ID, RAW_PASSWORD, NEW_RAW_PASSWORD)));
+
+            // Assert
+            assertThat(thrown).isInstanceOf(IncorrectCurrentPasswordException.class);
+            assertThat(user.getPassword()).isEqualTo(HASHED_PASSWORD);
+            verify(userRepository, never()).save(any());
+            verify(refreshTokenRepository, never()).saveAll(any());
+        }
+
+        @Test
+        void revokesEveryOpenSessionAndIssuesNewTokensWhenTheCurrentPasswordMatches() {
+            // Arrange
+            var user = new User(EMAIL, HASHED_PASSWORD);
+            var openSession = new RefreshToken("hashed-old-refresh-token", user,
+                    Instant.now().plus(7, ChronoUnit.DAYS));
+            var newExpiration = Date.from(Instant.now().plus(7, ChronoUnit.DAYS));
+            when(userRepository.findById(USER_ID)).thenReturn(Optional.of(user));
+            when(hashingService.matches(RAW_PASSWORD, HASHED_PASSWORD)).thenReturn(true);
+            when(hashingService.encode(NEW_RAW_PASSWORD)).thenReturn(NEW_HASHED_PASSWORD);
+            when(refreshTokenRepository.findAllByUserAndRevokedFalse(user))
+                    .thenReturn(new ArrayList<>(List.of(openSession)));
+            when(tokenService.generateAccessToken(EMAIL)).thenReturn("new-access-token");
+            when(tokenService.generateRefreshToken(EMAIL)).thenReturn("new-raw-refresh-token");
+            when(tokenHashingService.hash("new-raw-refresh-token")).thenReturn("new-hashed-refresh-token");
+            when(tokenService.getExpirationFromToken("new-raw-refresh-token")).thenReturn(newExpiration);
+
+            // Act
+            var tokens = service.handle(new ChangePasswordCommand(USER_ID, RAW_PASSWORD, NEW_RAW_PASSWORD));
+
+            // Assert
+            assertThat(tokens).isEqualTo(new AuthenticationTokens("new-access-token", "new-raw-refresh-token"));
+            assertThat(user.getPassword()).isEqualTo(NEW_HASHED_PASSWORD);
+            assertThat(openSession.isRevoked()).isTrue();
+            verify(userRepository).save(user);
+            verify(refreshTokenRepository).saveAll(List.of(openSession));
+
+            var issuedCaptor = ArgumentCaptor.forClass(RefreshToken.class);
+            verify(refreshTokenRepository).save(issuedCaptor.capture());
+            var issuedSession = issuedCaptor.getValue();
+            assertThat(issuedSession.getTokenHash()).isEqualTo("new-hashed-refresh-token");
+            assertThat(issuedSession.getUser()).isEqualTo(user);
+            assertThat(issuedSession.getExpiresAt()).isEqualTo(newExpiration.toInstant());
+            assertThat(issuedSession.getFamilyId()).isNotEqualTo(openSession.getFamilyId());
+            assertThat(issuedSession.isValid()).isTrue();
         }
     }
 }
