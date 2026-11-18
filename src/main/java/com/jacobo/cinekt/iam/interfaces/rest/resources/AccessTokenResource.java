@@ -1,4 +1,4 @@
 package com.jacobo.cinekt.iam.interfaces.rest.resources;
 
-public record RefreshTokenResource(String refreshToken) {
+public record AccessTokenResource(String accessToken) {
 }

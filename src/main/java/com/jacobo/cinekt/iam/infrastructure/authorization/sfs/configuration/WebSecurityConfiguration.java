@@ -3,6 +3,7 @@ package com.jacobo.cinekt.iam.infrastructure.authorization.sfs.configuration;
 import java.util.List;
 
 import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.security.authentication.AuthenticationManager;
@@ -19,6 +20,7 @@ import org.springframework.security.web.authentication.UsernamePasswordAuthentic
 import org.springframework.web.cors.CorsConfiguration;
 
 import com.jacobo.cinekt.iam.infrastructure.authorization.sfs.pipeline.BearerAuthorizationRequestFilter;
+import com.jacobo.cinekt.iam.infrastructure.authorization.sfs.pipeline.CsrfHeaderRequestFilter;
 import com.jacobo.cinekt.iam.infrastructure.hashing.bcrypt.BCryptHashingService;
 import com.jacobo.cinekt.iam.infrastructure.tokens.jwt.BearerTokenService;
 
@@ -29,14 +31,17 @@ public class WebSecurityConfiguration {
     private final BearerTokenService tokenService;
     private final BCryptHashingService hashingService;
     private final AuthenticationEntryPoint unauthorizedRequestHandler;
+    private final List<String> allowedOrigins;
 
     public WebSecurityConfiguration(@Qualifier("defaultUserDetailsService") UserDetailsService userDetailsService,
             BearerTokenService tokenService, BCryptHashingService hashingService,
-            AuthenticationEntryPoint unauthorizedRequestHandler) {
+            AuthenticationEntryPoint unauthorizedRequestHandler,
+            @Value("${cors.allowed-origins}") List<String> allowedOrigins) {
         this.userDetailsService = userDetailsService;
         this.tokenService = tokenService;
         this.hashingService = hashingService;
         this.unauthorizedRequestHandler = unauthorizedRequestHandler;
+        this.allowedOrigins = allowedOrigins;
     }
 
     @Bean
@@ -63,12 +68,19 @@ public class WebSecurityConfiguration {
     }
 
     @Bean
+    public CsrfHeaderRequestFilter csrfHeaderRequestFilter() {
+        return new CsrfHeaderRequestFilter();
+    }
+
+    @Bean
     public SecurityFilterChain filterChain(HttpSecurity http) throws Exception {
         http.cors(configurer -> configurer.configurationSource(request -> {
             var cors = new CorsConfiguration();
-            cors.setAllowedOrigins(List.of("*"));
-            cors.setAllowedMethods(List.of("GET", "POST", "PUT", "DELETE"));
+            cors.setAllowedOrigins(allowedOrigins);
+            cors.setAllowedMethods(List.of("GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"));
             cors.setAllowedHeaders(List.of("*"));
+            cors.setAllowCredentials(true);
+            cors.setMaxAge(3600L);
             return cors;
         }));
         http.csrf(csrfConfigurer -> csrfConfigurer.disable())
@@ -87,6 +99,7 @@ public class WebSecurityConfiguration {
                         .anyRequest().authenticated());
         http.authenticationProvider(authenticationProvider());
         http.addFilterBefore(authorizationRequestFilter(), UsernamePasswordAuthenticationFilter.class);
+        http.addFilterBefore(csrfHeaderRequestFilter(), UsernamePasswordAuthenticationFilter.class);
         return http.build();
     }
 
