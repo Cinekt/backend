@@ -90,6 +90,14 @@ class TokenServiceImplTest {
             long expectedExpirationMillis = before.getTime() + 7 * 24 * 60 * 60_000L;
             assertThat(expiration.getTime()).isCloseTo(expectedExpirationMillis, offset(5_000L));
         }
+
+        @Test
+        void isDifferentOnEveryCallEvenWithinTheSameSecond() {
+            var first = tokenService.generateRefreshToken(EMAIL);
+            var second = tokenService.generateRefreshToken(EMAIL);
+
+            assertThat(first).isNotEqualTo(second);
+        }
     }
 
     @Nested

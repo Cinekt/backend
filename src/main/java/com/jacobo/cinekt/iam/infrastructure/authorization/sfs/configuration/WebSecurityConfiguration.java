@@ -1,5 +1,6 @@
 package com.jacobo.cinekt.iam.infrastructure.authorization.sfs.configuration;
 
+import java.time.Duration;
 import java.util.List;
 
 import org.springframework.beans.factory.annotation.Qualifier;
@@ -21,8 +22,11 @@ import org.springframework.web.cors.CorsConfiguration;
 
 import com.jacobo.cinekt.iam.infrastructure.authorization.sfs.pipeline.BearerAuthorizationRequestFilter;
 import com.jacobo.cinekt.iam.infrastructure.authorization.sfs.pipeline.CsrfHeaderRequestFilter;
+import com.jacobo.cinekt.iam.infrastructure.authorization.sfs.pipeline.RateLimitRequestFilter;
 import com.jacobo.cinekt.iam.infrastructure.hashing.bcrypt.BCryptHashingService;
 import com.jacobo.cinekt.iam.infrastructure.tokens.jwt.BearerTokenService;
+
+import jakarta.servlet.DispatcherType;
 
 @Configuration
 @EnableMethodSecurity
@@ -73,7 +77,16 @@ public class WebSecurityConfiguration {
     }
 
     @Bean
-    public SecurityFilterChain filterChain(HttpSecurity http) throws Exception {
+    public RateLimitRequestFilter rateLimitRequestFilter(
+            @Value("${rate-limit.authentication.capacity}") int capacity,
+            @Value("${rate-limit.authentication.window-seconds}") int windowSeconds,
+            @Value("${rate-limit.authentication.max-tracked-clients}") int maximumTrackedClients) {
+        return new RateLimitRequestFilter(capacity, Duration.ofSeconds(windowSeconds), maximumTrackedClients);
+    }
+
+    @Bean
+    public SecurityFilterChain filterChain(HttpSecurity http, RateLimitRequestFilter rateLimitRequestFilter)
+            throws Exception {
         http.cors(configurer -> configurer.configurationSource(request -> {
             var cors = new CorsConfiguration();
             cors.setAllowedOrigins(allowedOrigins);
@@ -88,6 +101,7 @@ public class WebSecurityConfiguration {
                         exceptionHandling -> exceptionHandling.authenticationEntryPoint(unauthorizedRequestHandler))
                 .sessionManagement(customizer -> customizer.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .authorizeHttpRequests(authorizeRequest -> authorizeRequest
+                        .dispatcherTypeMatchers(DispatcherType.ERROR).permitAll()
                         .requestMatchers(
                                 "/api/v1/authentication/**",
                                 "/v3/api-docs/**",
@@ -98,6 +112,7 @@ public class WebSecurityConfiguration {
                         .permitAll()
                         .anyRequest().authenticated());
         http.authenticationProvider(authenticationProvider());
+        http.addFilterBefore(rateLimitRequestFilter, UsernamePasswordAuthenticationFilter.class);
         http.addFilterBefore(authorizationRequestFilter(), UsernamePasswordAuthenticationFilter.class);
         http.addFilterBefore(csrfHeaderRequestFilter(), UsernamePasswordAuthenticationFilter.class);
         return http.build();

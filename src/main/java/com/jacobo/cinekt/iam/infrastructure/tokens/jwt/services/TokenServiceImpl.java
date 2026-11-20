@@ -2,6 +2,7 @@ package com.jacobo.cinekt.iam.infrastructure.tokens.jwt.services;
 
 import java.nio.charset.StandardCharsets;
 import java.util.Date;
+import java.util.UUID;
 import java.util.function.Function;
 
 import javax.crypto.SecretKey;
@@ -112,6 +113,7 @@ public class TokenServiceImpl implements BearerTokenService {
     private String buildToken(String username, String tokenType, Date issuedAt, Date expiration) {
         SecretKey key = getSigningKey();
         return Jwts.builder()
+                .id(UUID.randomUUID().toString())
                 .subject(username)
                 .claim(TOKEN_TYPE_CLAIM, tokenType)
                 .issuedAt(issuedAt)
